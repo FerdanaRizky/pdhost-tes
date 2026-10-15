@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.0
+- Added Database Manager navigation and status page.
+- Displays MariaDB/MySQL client detection, systemd service status, and local socket response using the authenticated agent.
+- Database changes are intentionally disabled in this release until provisioning and least-privilege integration tests are complete.
+
 ## v0.3.0
 - Added File Manager for active OpenHost websites: list folders/files, read and save UTF-8 text files, create files and folders, and delete files or empty folders.
 - Agent enforces a per-website public document-root boundary, rejects path traversal and symbolic links, and caps editor reads/writes at 1 MiB.
