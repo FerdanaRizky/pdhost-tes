@@ -400,15 +400,15 @@ def backup_database(database):
     fd, temp_path = tempfile.mkstemp(prefix=".openhost-backup-", dir=BACKUP_ROOT)
     os.close(fd)
     try:
-        with open(temp_path, "wb") as output:
+        import gzip
+        with gzip.open(temp_path, "wb", compresslevel=6) as output:
             dump_result = subprocess.run([dump, "--protocol=socket", "--single-transaction", "--quick", "--routines", "--triggers", database],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300, check=False)
-            if dump_result.returncode:
-                raise RuntimeError((dump_result.stderr.decode("utf-8", "replace") or "Database dump gagal.")[-400:])
-            import gzip
-            with gzip.GzipFile(fileobj=output, mode="wb", mtime=0) as gz:
-                gz.write(dump_result.stdout)
-            output.flush(); os.fsync(output.fileno())
+                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.PIPE, timeout=300, check=False)
+            output.flush()
+        if dump_result.returncode:
+            raise RuntimeError((dump_result.stderr.decode("utf-8", "replace") or "Database dump gagal.")[-400:])
+        with open(temp_path, "rb") as output:
+            os.fsync(output.fileno())
         if os.path.getsize(temp_path) < 20:
             raise RuntimeError("Hasil backup kosong atau tidak valid.")
         os.chmod(temp_path, 0o600)
