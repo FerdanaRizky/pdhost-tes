@@ -29,6 +29,26 @@ def human_bytes(value):
         value /= 1024
     return f"{value:.1f} TB"
 
+MONITORED_SERVICES = {'nginx': 'nginx', 'mariadb': 'mariadb', 'mysql': 'mysql', 'redis': 'redis-server', 'ssh': 'ssh'}
+
+def list_services():
+    systemctl = shutil.which('systemctl')
+    if not systemctl:
+        return {'ok': False, 'error': 'systemctl tidak tersedia pada sistem ini.'}
+    items = []
+    for key, unit in MONITORED_SERVICES.items():
+        probe = subprocess.run([systemctl, 'show', unit, '--property=LoadState', '--value'],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5, check=False)
+        if probe.returncode != 0 or probe.stdout.strip() in ('', 'not-found'):
+            items.append({'id': key, 'unit': unit, 'installed': False, 'state': 'not-installed'})
+            continue
+        state = subprocess.run([systemctl, 'is-active', unit], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5, check=False).stdout.strip() or 'unknown'
+        enabled = subprocess.run([systemctl, 'is-enabled', unit], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5, check=False).stdout.strip() or 'unknown'
+        items.append({'id': key, 'unit': unit, 'installed': True, 'state': state, 'enabled': enabled})
+    return {'ok': True, 'services': items}
+
 def get_metrics():
     mem_total = mem_available = 0
     try:
@@ -525,6 +545,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path=="/api/v1/health": self.send_json(200,{"ok":True,"service":"openhost-agent","version":VERSION}); return
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         if path=="/api/v1/metrics": self.send_json(200,get_metrics())
+        elif path=="/api/v1/services": self.send_json(200,list_services())
         elif path=="/api/v1/sites": self.send_json(200,{"ok":True,"sites":list_sites()})
         elif path=="/api/v1/databases/status": self.send_json(200,database_status())
         elif path=="/api/v1/databases": self.send_json(200,list_databases())
