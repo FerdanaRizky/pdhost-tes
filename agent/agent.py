@@ -528,6 +528,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path=="/api/v1/databases/status": self.send_json(200,database_status())
         elif path=="/api/v1/databases": self.send_json(200,list_databases())
         elif path=="/api/v1/databases/backups": self.send_json(200,list_database_backups())
+        elif path=="/api/v1/ssl/status":
+            q=parse_qs(urlparse(self.path).query)
+            self.send_json(200,ssl_status(q.get("domain",[""])[0]))
         elif path=="/api/v1/files/list":
             q=parse_qs(urlparse(self.path).query)
             try: self.send_json(200,list_site_files(q.get("domain",[""])[0],q.get("path",[""])[0]))
@@ -540,7 +543,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         path=urlparse(self.path).path
-        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create","/api/v1/databases/delete","/api/v1/databases/backup")
+        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create","/api/v1/databases/delete","/api/v1/databases/backup","/api/v1/ssl/enable")
         if path not in allowed: self.send_json(404,{"ok":False,"error":"not_found"}); return
         try:
             length=int(self.headers.get("Content-Length","0"))
@@ -548,7 +551,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data=json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(data,dict): raise ValueError("Request harus berupa objek.")
             domain=data.get("domain","")
-            if path=="/api/v1/databases/create": result=create_database()
+            if path=="/api/v1/ssl/enable": result=enable_ssl(data.get("domain",""),data.get("email",""))
+            elif path=="/api/v1/databases/create": result=create_database()
             elif path=="/api/v1/databases/delete": result=delete_database(data.get("database",""),data.get("confirmation",""))
             elif path=="/api/v1/databases/backup": result=backup_database(data.get("database",""))
             elif path=="/api/v1/sites/create": result=create_site(domain)
