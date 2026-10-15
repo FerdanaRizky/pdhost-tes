@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0
+- Added SSL Certificates page to request Let's Encrypt certificates for OpenHost-managed websites.
+- Added authenticated agent endpoints for certificate status and issuance.
+- Configures HTTPS with HTTP redirect, TLS 1.2/1.3, webroot ACME challenge handling, Nginx validation and rollback, and renewal deploy hook.
+- Installer attempts to install Certbot; added SSL configuration unit tests.
+
 ## v0.6.0
 - Added explicit-name confirmation before removing OpenHost-managed databases and their dedicated local users.
 - Added compressed database backup creation, backup history listing, and root-only backup file permissions.
