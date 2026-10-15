@@ -18,7 +18,7 @@ class DatabaseManagerTests(unittest.TestCase):
         self.assertRegex(result['username'], r'^ohu_[a-f0-9]{10}$')
         self.assertGreaterEqual(len(result['password']), 24)
         sql = mysql_query.call_args.args[0]
-        self.assertIn('GRANT ALL PRIVILEGES ON ' + result['database'] + '.*', sql)
+        self.assertIn('GRANT ALL PRIVILEGES ON `' + result['database'] + '`.*', sql)
         self.assertNotIn('GRANT ALL PRIVILEGES ON *.*', sql)
         self.assertIn("'localhost'", sql)
 
