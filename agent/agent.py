@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """OpenHost Panel privileged agent: fixed allow-listed operations only."""
 import glob, http.server, json, os, platform, re, secrets, shutil, subprocess, tempfile, time
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 TOKEN_FILE = "/etc/openhost-panel/agent.token"
 SITE_ROOT = "/var/www/openhost-sites"
+FILE_MAX_BYTES = 1024 * 1024
 CONF_DIR = "/etc/nginx/conf.d"
 STARTED = time.monotonic()
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$")
@@ -156,6 +157,132 @@ def disable_site(domain):
             except OSError: pass
         return {"ok":False,"error":"Gagal menonaktifkan website: "+str(exc)[:200]}
 
+
+def resolve_site_path(domain, rel_path=""):
+    """Resolve a relative path strictly inside one OpenHost site's public directory."""
+    domain = domain.strip().lower().rstrip(".") if isinstance(domain, str) else ""
+    if not valid_domain(domain):
+        raise ValueError("Domain tidak valid.")
+    base = os.path.join(SITE_ROOT, domain, "public")
+    if not os.path.isdir(base) or os.path.islink(base):
+        raise ValueError("Document root website tidak ditemukan.")
+    base_real = os.path.realpath(base)
+    if os.path.commonpath([os.path.realpath(SITE_ROOT), base_real]) != os.path.realpath(SITE_ROOT):
+        raise ValueError("Lokasi website tidak diizinkan.")
+    if not isinstance(rel_path, str) or "\x00" in rel_path or rel_path.startswith(("/", "\\")):
+        raise ValueError("Path tidak valid.")
+    parts = [p for p in rel_path.replace("\\", "/").split("/") if p not in ("", ".")]
+    if any(p == ".." or p.startswith(".openhost-") for p in parts):
+        raise ValueError("Path traversal tidak diizinkan.")
+    current = base
+    for part in parts:
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            raise ValueError("Akses ke symbolic link tidak diizinkan.")
+        if os.path.lexists(current):
+            resolved = os.path.realpath(current)
+            if os.path.commonpath([base_real, resolved]) != base_real:
+                raise ValueError("Path keluar dari document root.")
+    return base_real, current, "/".join(parts)
+
+def list_site_files(domain, rel_path=""):
+    base, target, relative = resolve_site_path(domain, rel_path)
+    if not os.path.isdir(target):
+        raise ValueError("Path bukan direktori.")
+    items = []
+    with os.scandir(target) as entries:
+        for entry in sorted(entries, key=lambda e: (not e.is_dir(follow_symlinks=False), e.name.lower())):
+            if entry.is_symlink():
+                continue
+            try:
+                info = entry.stat(follow_symlinks=False)
+                is_dir = entry.is_dir(follow_symlinks=False)
+                if not is_dir and not entry.is_file(follow_symlinks=False):
+                    continue
+                items.append({
+                    "name": entry.name,
+                    "path": "/".join(filter(None, [relative, entry.name])),
+                    "directory": is_dir,
+                    "size": info.st_size,
+                    "modified": int(info.st_mtime),
+                })
+            except OSError:
+                continue
+    return {"ok": True, "domain": domain, "path": relative, "items": items}
+
+def read_site_file(domain, rel_path):
+    base, target, relative = resolve_site_path(domain, rel_path)
+    if not os.path.isfile(target) or os.path.islink(target):
+        raise ValueError("File tidak ditemukan atau bukan file biasa.")
+    size = os.path.getsize(target)
+    if size > FILE_MAX_BYTES:
+        raise ValueError("File terlalu besar untuk editor web (maksimum 1 MiB).")
+    with open(target, "rb") as f:
+        raw = f.read(FILE_MAX_BYTES + 1)
+    if b"\x00" in raw:
+        raise ValueError("File biner tidak dapat diedit dari editor teks.")
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("File bukan teks UTF-8 yang didukung.")
+    return {"ok": True, "domain": domain, "path": relative, "content": content, "size": size}
+
+def write_site_file(domain, rel_path, content, create_only=False):
+    if not isinstance(content, str):
+        raise ValueError("Konten file tidak valid.")
+    encoded = content.encode("utf-8")
+    if len(encoded) > FILE_MAX_BYTES:
+        raise ValueError("Konten terlalu besar (maksimum 1 MiB).")
+    base, target, relative = resolve_site_path(domain, rel_path)
+    if not relative or os.path.isdir(target):
+        raise ValueError("Pilih nama file yang valid.")
+    parent = os.path.dirname(target)
+    if not os.path.isdir(parent):
+        raise ValueError("Direktori tujuan tidak ditemukan.")
+    if os.path.islink(target):
+        raise ValueError("Symbolic link tidak dapat ditulis.")
+    if create_only and os.path.lexists(target):
+        raise ValueError("File sudah ada.")
+    if os.path.lexists(target) and not os.path.isfile(target):
+        raise ValueError("Tujuan bukan file biasa.")
+    fd, temp_path = tempfile.mkstemp(prefix=".openhost-tmp-", dir=parent)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(encoded)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(temp_path, 0o644)
+        if os.path.islink(target):
+            raise ValueError("Symbolic link tidak dapat ditulis.")
+        os.replace(temp_path, target)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+    return {"ok": True, "domain": domain, "path": relative, "message": "File berhasil disimpan."}
+
+def create_site_directory(domain, rel_path):
+    base, target, relative = resolve_site_path(domain, rel_path)
+    if not relative:
+        raise ValueError("Nama folder tidak boleh kosong.")
+    if os.path.lexists(target):
+        raise ValueError("Path sudah ada.")
+    os.mkdir(target, 0o755)
+    return {"ok": True, "path": relative, "message": "Folder berhasil dibuat."}
+
+def delete_site_entry(domain, rel_path):
+    base, target, relative = resolve_site_path(domain, rel_path)
+    if not relative:
+        raise ValueError("Document root tidak dapat dihapus.")
+    if not os.path.lexists(target) or os.path.islink(target):
+        raise ValueError("File atau folder tidak ditemukan.")
+    if os.path.isdir(target):
+        os.rmdir(target)  # Empty directories only; never recursively erase a tree.
+    elif os.path.isfile(target):
+        os.unlink(target)
+    else:
+        raise ValueError("Jenis file tidak didukung.")
+    return {"ok": True, "path": relative, "message": "Item berhasil dihapus."}
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version="OpenHostAgent/"+VERSION
     def log_message(self,*args): pass
@@ -173,19 +300,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         if path=="/api/v1/metrics": self.send_json(200,get_metrics())
         elif path=="/api/v1/sites": self.send_json(200,{"ok":True,"sites":list_sites()})
+        elif path=="/api/v1/files/list":
+            q=parse_qs(urlparse(self.path).query)
+            try: self.send_json(200,list_site_files(q.get("domain",[""])[0],q.get("path",[""])[0]))
+            except (ValueError,OSError) as exc: self.send_json(400,{"ok":False,"error":str(exc)[:240]})
+        elif path=="/api/v1/files/read":
+            q=parse_qs(urlparse(self.path).query)
+            try: self.send_json(200,read_site_file(q.get("domain",[""])[0],q.get("path",[""])[0]))
+            except (ValueError,OSError) as exc: self.send_json(400,{"ok":False,"error":str(exc)[:240]})
         else: self.send_json(404,{"ok":False,"error":"not_found"})
     def do_POST(self):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         path=urlparse(self.path).path
-        if path not in ("/api/v1/sites/create","/api/v1/sites/disable"): self.send_json(404,{"ok":False,"error":"not_found"}); return
+        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete")
+        if path not in allowed: self.send_json(404,{"ok":False,"error":"not_found"}); return
         try:
             length=int(self.headers.get("Content-Length","0"))
-            if length<1 or length>4096: raise ValueError("Ukuran request tidak valid.")
+            if length<1 or length>FILE_MAX_BYTES+8192: raise ValueError("Ukuran request tidak valid.")
             data=json.loads(self.rfile.read(length).decode("utf-8"))
-            domain=data.get("domain","") if isinstance(data,dict) else ""
-            result=create_site(domain) if path.endswith("/create") else disable_site(domain)
+            if not isinstance(data,dict): raise ValueError("Request harus berupa objek.")
+            domain=data.get("domain","")
+            if path=="/api/v1/sites/create": result=create_site(domain)
+            elif path=="/api/v1/sites/disable": result=disable_site(domain)
+            elif path=="/api/v1/files/write": result=write_site_file(domain,data.get("path",""),data.get("content",""))
+            elif path=="/api/v1/files/create": result=write_site_file(domain,data.get("path",""),data.get("content",""),create_only=True)
+            elif path=="/api/v1/files/mkdir": result=create_site_directory(domain,data.get("path",""))
+            else: result=delete_site_entry(domain,data.get("path",""))
             self.send_json(200 if result.get("ok") else 400,result)
-        except Exception as exc: self.send_json(400,{"ok":False,"error":"Request tidak valid: "+str(exc)[:160]})
+        except Exception as exc: self.send_json(400,{"ok":False,"error":"Request tidak valid: "+str(exc)[:240]})
 
 if __name__=="__main__":
     os.makedirs(CONF_DIR,exist_ok=True)
