@@ -49,6 +49,58 @@ def list_services():
         items.append({'id': key, 'unit': unit, 'installed': True, 'state': state, 'enabled': enabled})
     return {'ok': True, 'services': items}
 
+
+CRON_DIR = "/etc/cron.d"
+CRON_FIELDS = [(0,59),(0,23),(1,31),(1,12),(0,7)]
+
+def list_cron_jobs():
+    jobs = []
+    for path in sorted(glob.glob(os.path.join(CRON_DIR, "openhost-job-*"))):
+        if os.path.islink(path) or not os.path.isfile(path): continue
+        try:
+            with open(path, encoding="utf-8") as f: lines = f.read(4096).splitlines()
+            if len(lines) != 2 or not lines[0].startswith("# OpenHost managed cron "): continue
+            jobs.append({"file": os.path.basename(path), "schedule": lines[1].split(None, 5)[:5], "command": lines[1].split(None, 5)[5] if len(lines[1].split(None, 5)) > 5 else ""})
+        except (OSError, UnicodeError): continue
+    return {"ok": True, "jobs": jobs}
+
+def create_cron_job(data):
+    schedule = [data.get(k, "*") for k in ("minute","hour","day","month","weekday")]
+    if not all(isinstance(v,str) and re.fullmatch(r"(\*|[0-9]+|\*/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*/[0-9]+|[0-9]+-[0-9]+))*",v) and len(v)<64 for v in schedule):
+        return {"ok":False,"error":"Format jadwal cron tidak valid."}
+    domain, script = data.get("domain",""), data.get("script","")
+    if not valid_domain(domain) or not isinstance(script,str) or not re.fullmatch(r"[A-Za-z0-9_./-]+\.php",script) or script.startswith("/") or ".." in script.split("/") or "//" in script:
+        return {"ok":False,"error":"Pilih file PHP relatif yang valid."}
+    root = os.path.join(SITE_ROOT,domain,"public")
+    target = os.path.abspath(os.path.join(root,script))
+    if not target.startswith(root+os.sep) or os.path.islink(target) or not os.path.isfile(target):
+        return {"ok":False,"error":"File PHP tidak ditemukan di document root."}
+    php = shutil.which("php")
+    if not php: return {"ok":False,"error":"PHP CLI belum terpasang."}
+    os.makedirs(CRON_DIR,mode=0o755,exist_ok=True)
+    name = "openhost-job-"+secrets.token_hex(6)
+    content = "# OpenHost managed cron "+domain+"\n"+" ".join(schedule)+" www-data "+php+" "+target+"\n"
+    fd,tmp = tempfile.mkstemp(prefix=".openhost-cron-",dir=CRON_DIR,text=True)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as f: f.write(content); f.flush(); os.fsync(f.fileno())
+        os.chmod(tmp,0o644); os.replace(tmp,os.path.join(CRON_DIR,name))
+        return {"ok":True,"file":name,"message":"Cron job dibuat."}
+    except OSError as exc: return {"ok":False,"error":"Gagal membuat cron: "+str(exc)[:180]}
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+
+def delete_cron_job(name, confirmation):
+    if not isinstance(name,str) or not re.fullmatch(r"openhost-job-[a-f0-9]{12}",name) or confirmation != name:
+        return {"ok":False,"error":"Nama cron atau konfirmasi tidak valid."}
+    path = os.path.join(CRON_DIR,name)
+    if os.path.islink(path) or not os.path.isfile(path): return {"ok":False,"error":"Cron tidak ditemukan."}
+    try:
+        with open(path,encoding="utf-8") as f: header=f.readline(256).strip()
+        if not header.startswith("# OpenHost managed cron "): return {"ok":False,"error":"File bukan cron OpenHost."}
+        os.unlink(path); return {"ok":True,"message":"Cron job dihapus."}
+    except OSError as exc: return {"ok":False,"error":"Gagal menghapus cron: "+str(exc)[:180]}
+
+
 def get_metrics():
     mem_total = mem_available = 0
     try:
@@ -546,6 +598,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         if path=="/api/v1/metrics": self.send_json(200,get_metrics())
         elif path=="/api/v1/services": self.send_json(200,list_services())
+        elif path=="/api/v1/cron": self.send_json(200,list_cron_jobs())
         elif path=="/api/v1/sites": self.send_json(200,{"ok":True,"sites":list_sites()})
         elif path=="/api/v1/databases/status": self.send_json(200,database_status())
         elif path=="/api/v1/databases": self.send_json(200,list_databases())
@@ -565,7 +618,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         path=urlparse(self.path).path
-        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create","/api/v1/databases/delete","/api/v1/databases/backup","/api/v1/ssl/enable")
+        allowed=("/api/v1/cron/create","/api/v1/cron/delete","/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create","/api/v1/databases/delete","/api/v1/databases/backup","/api/v1/ssl/enable")
         if path not in allowed: self.send_json(404,{"ok":False,"error":"not_found"}); return
         try:
             length=int(self.headers.get("Content-Length","0"))
@@ -573,7 +626,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data=json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(data,dict): raise ValueError("Request harus berupa objek.")
             domain=data.get("domain","")
-            if path=="/api/v1/ssl/enable": result=enable_ssl(data.get("domain",""),data.get("email",""))
+            if path=="/api/v1/cron/create": result=create_cron_job(data)
+            elif path=="/api/v1/cron/delete": result=delete_cron_job(data.get("file",""),data.get("confirmation",""))
+            elif path=="/api/v1/ssl/enable": result=enable_ssl(data.get("domain",""),data.get("email",""))
             elif path=="/api/v1/databases/create": result=create_database()
             elif path=="/api/v1/databases/delete": result=delete_database(data.get("database",""),data.get("confirmation",""))
             elif path=="/api/v1/databases/backup": result=backup_database(data.get("database",""))
