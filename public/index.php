@@ -15,7 +15,7 @@ function agentRequest(string $method,string $path,array $payload=[]): array {
   $token=trim((string)@file_get_contents(TOKEN_FILE)); if($token==='') return ['ok'=>false,'error'=>'Token agent tidak dapat dibaca.'];
   $headers="Authorization: Bearer {$token}\r\n"; $content='';
   if($method==='POST') { $content=json_encode($payload,JSON_UNESCAPED_SLASHES); $headers.="Content-Type: application/json\r\n"; }
-  $context=stream_context_create(['http'=>['method'=>$method,'timeout'=>15,'ignore_errors'=>true,'header'=>$headers,'content'=>$content]]);
+  $context=stream_context_create(['http'=>['method'=>$method,'timeout'=>45,'ignore_errors'=>true,'header'=>$headers,'content'=>$content]]);
   $body=@file_get_contents('http://127.0.0.1:8787'.$path,false,$context); $data=json_decode((string)$body,true);
   return is_array($data)?$data:['ok'=>false,'error'=>'Agent offline atau memberi respons tidak valid.'];
 }
