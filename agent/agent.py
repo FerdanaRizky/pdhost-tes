@@ -3,7 +3,7 @@
 import glob, http.server, json, os, platform, re, secrets, shutil, subprocess, tempfile, time
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 TOKEN_FILE = "/etc/openhost-panel/agent.token"
 SITE_ROOT = "/var/www/openhost-sites"
 FILE_MAX_BYTES = 1024 * 1024
@@ -93,6 +93,7 @@ def site_config(domain, root, socket):
       f"    server_name {domain};\n    root {root};\n"
       "    index index.php index.html;\n    server_tokens off;\n"
       f"    access_log /var/log/nginx/{domain}.access.log;\n    error_log /var/log/nginx/{domain}.error.log;\n"
+      "    location ^~ /.well-known/acme-challenge/ { try_files $uri =404; }\n"
       "    location / { try_files $uri $uri/ /index.php?$query_string; }\n"
       "    location ~ \\.php$ {\n        try_files $uri =404;\n        include fastcgi_params;\n"
       "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n"
