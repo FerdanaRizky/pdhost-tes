@@ -129,7 +129,7 @@ IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [[ -n "$IP" ]] || IP=IP_SERVER
 cat <<INFO
 
-OpenHost Panel v0.4.0 terpasang.
+OpenHost Panel v0.5.0 terpasang.
 URL: http://$IP:8888
 Username: admin
 Password awal: admin (wajib diganti saat login pertama)
