@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.0
+- Added explicit-name confirmation before removing OpenHost-managed databases and their dedicated local users.
+- Added compressed database backup creation, backup history listing, and root-only backup file permissions.
+- Added tests for deletion guards and backup utility prerequisites.
+- Fixed Database Manager create requests to send a JSON object to the agent.
+
 ## v0.5.0
 - Added Database Manager creation form and managed database listing.
 - Creates a database with a random name and a dedicated local account scoped to that database.
