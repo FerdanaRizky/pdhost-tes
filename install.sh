@@ -104,7 +104,8 @@ NGINX
 # This panel listens on 8888; leave the distribution's default virtual host untouched.
 nginx -t || { echo "[ERROR] Konfigurasi Nginx tidak valid. Backup: $BACKUP_DIR" >&2; exit 3; }
 systemctl daemon-reload
-systemctl enable --now openhost-agent
+systemctl enable openhost-agent
+if systemctl is-active --quiet openhost-agent; then systemctl restart openhost-agent; else systemctl start openhost-agent; fi
 systemctl enable nginx
 systemctl restart nginx
 
