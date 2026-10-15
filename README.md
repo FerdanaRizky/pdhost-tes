@@ -2,7 +2,7 @@
 
 OpenHost Panel is an independent Linux hosting control panel built with a PHP web interface and a separate allow-listed Python agent. It is not affiliated with aaPanel.
 
-## Current release: v0.4.0
+## Current release: v0.5.0
 
 - Responsive dark dashboard with OS, load average, memory, disk and uptime metrics.
 - Website Manager for validated domains, Nginx virtual hosts and PHP-FPM.
