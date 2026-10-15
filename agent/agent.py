@@ -99,6 +99,26 @@ def site_config(domain, root, socket):
       f"        fastcgi_pass unix:{socket};\n    }}\n"
       "    location ~ /\\. { deny all; }\n}\n")
 
+def site_config_ssl(domain, root, socket):
+    cert = f'/etc/letsencrypt/live/{domain}/fullchain.pem'
+    key = f'/etc/letsencrypt/live/{domain}/privkey.pem'
+    return ("# Managed by OpenHost Panel. Do not edit manually.\n"
+      "server {\n    listen 80;\n    listen [::]:80;\n"
+      f"    server_name {domain};\n    root {root};\n"
+      "    location ^~ /.well-known/acme-challenge/ { try_files $uri =404; }\n"
+      "    location / { return 301 https://$host$request_uri; }\n}\n"
+      "server {\n    listen 443 ssl;\n    listen [::]:443 ssl;\n"
+      f"    server_name {domain};\n    root {root};\n"
+      f"    ssl_certificate {cert};\n    ssl_certificate_key {key};\n"
+      "    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_session_cache shared:OpenHostSSL:10m;\n"
+      "    index index.php index.html;\n    server_tokens off;\n"
+      f"    access_log /var/log/nginx/{domain}.access.log;\n    error_log /var/log/nginx/{domain}.error.log;\n"
+      "    location / { try_files $uri $uri/ /index.php?$query_string; }\n"
+      "    location ~ \\.php$ {\n        try_files $uri =404;\n        include fastcgi_params;\n"
+      "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n"
+      f"        fastcgi_pass unix:{socket};\n    }}\n"
+      "    location ~ /\\. { deny all; }\n}\n")
+
 def create_site(domain):
     domain=domain.strip().lower().rstrip(".") if isinstance(domain,str) else ""
     if not valid_domain(domain): return {"ok":False,"error":"Domain tidak valid. Gunakan FQDN seperti example.com."}
@@ -134,6 +154,72 @@ def create_site(domain):
             if temp_conf and os.path.exists(temp_conf): os.unlink(temp_conf)
         except OSError: pass
         return {"ok":False,"error":"Gagal membuat website: "+str(exc)[:250]}
+
+def ssl_status(domain):
+    domain = domain.strip().lower().rstrip('.') if isinstance(domain, str) else ''
+    if not valid_domain(domain): return {'ok': False, 'error': 'Domain tidak valid.'}
+    cert = f'/etc/letsencrypt/live/{domain}/fullchain.pem'
+    key = f'/etc/letsencrypt/live/{domain}/privkey.pem'
+    return {'ok': True, 'domain': domain, 'issued': os.path.isfile(cert) and os.path.isfile(key),
+            'certbot_installed': bool(shutil.which('certbot')), 'enabled': os.path.isfile(os.path.join(CONF_DIR, 'oh-' + domain + '.conf')) and os.path.isfile(cert) and os.path.isfile(key)}
+
+def enable_ssl(domain, email):
+    domain = domain.strip().lower().rstrip('.') if isinstance(domain, str) else ''
+    email = email.strip() if isinstance(email, str) else ''
+    if not valid_domain(domain): return {'ok': False, 'error': 'Domain tidak valid.'}
+    if len(email) > 254 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        return {'ok': False, 'error': 'Alamat email untuk notifikasi sertifikat tidak valid.'}
+    conf = os.path.join(CONF_DIR, 'oh-' + domain + '.conf')
+    root = os.path.join(SITE_ROOT, domain, 'public')
+    if not os.path.isfile(conf) or not os.path.isdir(root) or os.path.islink(root):
+        return {'ok': False, 'error': 'Website OpenHost aktif tidak ditemukan. Buat atau aktifkan website terlebih dahulu.'}
+    certbot = shutil.which('certbot')
+    if not certbot: return {'ok': False, 'error': 'Certbot belum terpasang. Instal paket certbot lalu coba lagi.'}
+    cert = f'/etc/letsencrypt/live/{domain}/fullchain.pem'
+    key = f'/etc/letsencrypt/live/{domain}/privkey.pem'
+    if not (os.path.isfile(cert) and os.path.isfile(key)):
+        result = subprocess.run([certbot, 'certonly', '--webroot', '-w', root, '-d', domain,
+            '--email', email, '--agree-tos', '--non-interactive', '--keep-until-expiring', '--no-eff-email'],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=300, check=False)
+        if result.returncode:
+            return {'ok': False, 'error': 'Penerbitan sertifikat gagal. Pastikan DNS A/AAAA mengarah ke server, port 80 dapat diakses, dan email benar. ' + result.stdout[-700:]}
+    socket = find_php_fpm_socket()
+    if not socket: return {'ok': False, 'error': 'Sertifikat terbit, tetapi socket PHP-FPM tidak ditemukan; konfigurasi website belum diubah.'}
+    old = open(conf, encoding='utf-8').read()
+    fd, temp_conf = tempfile.mkstemp(prefix='.openhost-ssl-', dir=CONF_DIR, text=True)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            stream.write(site_config_ssl(domain, root, socket))
+            stream.flush(); os.fsync(stream.fileno())
+        os.chmod(temp_conf, 0o644)
+        os.replace(temp_conf, conf); temp_conf = ''
+        test = run_checked(['/usr/sbin/nginx', '-t'])
+        if test.returncode:
+            fd, rollback = tempfile.mkstemp(prefix='.openhost-rollback-', dir=CONF_DIR, text=True)
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream: stream.write(old)
+            os.chmod(rollback, 0o644); os.replace(rollback, conf)
+            return {'ok': False, 'error': 'Validasi Nginx gagal; konfigurasi HTTP dikembalikan. ' + test.stdout[-600:]}
+        reload = run_checked(['/bin/systemctl', 'reload', 'nginx'])
+        if reload.returncode:
+            fd, rollback = tempfile.mkstemp(prefix='.openhost-rollback-', dir=CONF_DIR, text=True)
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream: stream.write(old)
+            os.chmod(rollback, 0o644); os.replace(rollback, conf)
+            run_checked(['/bin/systemctl', 'reload', 'nginx'])
+            return {'ok': False, 'error': 'Reload Nginx gagal; konfigurasi HTTP dikembalikan.'}
+        hook_dir = '/etc/letsencrypt/renewal-hooks/deploy'
+        os.makedirs(hook_dir, mode=0o755, exist_ok=True)
+        hook = os.path.join(hook_dir, 'openhost-nginx-reload')
+        hook_content = '#!/bin/sh\n/usr/bin/systemctl reload nginx\n'
+        if not os.path.exists(hook):
+            with open(hook, 'x', encoding='utf-8') as stream: stream.write(hook_content)
+            os.chmod(hook, 0o755)
+        return {'ok': True, 'domain': domain, 'message': 'SSL aktif. Certbot dapat memperpanjang sertifikat; deploy hook akan reload Nginx.'}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {'ok': False, 'error': 'Gagal mengaktifkan SSL: ' + str(exc)[:250]}
+    finally:
+        if temp_conf and os.path.exists(temp_conf):
+            try: os.unlink(temp_conf)
+            except OSError: pass
 
 def disable_site(domain):
     domain=domain.strip().lower().rstrip(".") if isinstance(domain,str) else ""
