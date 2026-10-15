@@ -12,7 +12,13 @@ if ! command -v curl >/dev/null 2>&1; then
   elif command -v apk >/dev/null 2>&1; then apk add --no-cache curl tar
   else echo '[ERROR] Instal curl dan tar terlebih dahulu.' >&2; exit 2; fi
 fi
-command -v tar >/dev/null 2>&1 || { echo '[ERROR] tar tidak ditemukan.' >&2; exit 2; }
+if ! command -v tar >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y tar
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y tar
+  elif command -v yum >/dev/null 2>&1; then yum install -y tar
+  elif command -v apk >/dev/null 2>&1; then apk add --no-cache tar
+  else echo '[ERROR] Instal tar terlebih dahulu.' >&2; exit 2; fi
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 echo '[INFO] Mengunduh source OpenHost Panel dari GitHub...'
