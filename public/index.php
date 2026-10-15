@@ -6,6 +6,7 @@ session_start();
 const DATA_DIR='/opt/openhost-panel/data';
 const USER_FILE=DATA_DIR.'/admin.json';
 const TOKEN_FILE='/etc/openhost-panel/agent.token';
+const FILE_MAX_BYTES=1048576;
 function e(string $value): string { return htmlspecialchars($value, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8'); }
 function csrf(): string { if(empty($_SESSION['csrf'])) $_SESSION['csrf']=bin2hex(random_bytes(32)); return $_SESSION['csrf']; }
 function loadUser(): array { $data=json_decode((string)@file_get_contents(USER_FILE),true); return is_array($data)?$data:['username'=>'admin','hash'=>'','must_change'=>true]; }
@@ -40,6 +41,27 @@ if($_SERVER['REQUEST_METHOD']==='POST') {
     $domain=strtolower(trim((string)($_POST['domain']??'')));
     if(!validDomain($domain)) $error='Format domain tidak valid.';
     else { $result=agentRequest('POST','/api/v1/sites/disable',['domain'=>$domain]); if(!empty($result['ok'])) { $_SESSION['flash']='Website '.$domain.' dinonaktifkan. File tetap disimpan.'; header('Location: /?page=websites'); exit; } $error=(string)($result['error']??'Gagal menonaktifkan website.'); }
+  } elseif(isset($_POST['file_save']) && !empty($_SESSION['user']) && empty($user['must_change'])) {
+    $domain=strtolower(trim((string)($_POST['domain']??''))); $path=(string)($_POST['path']??''); $content=(string)($_POST['content']??'');
+    if(!validDomain($domain)) $error='Domain tidak valid.';
+    elseif(strlen($content)>FILE_MAX_BYTES) $error='File maksimal 1 MiB.';
+    else { $result=agentRequest('POST','/api/v1/files/write',['domain'=>$domain,'path'=>$path,'content'=>$content]); if(!empty($result['ok'])) { $_SESSION['flash']='File berhasil disimpan.'; header('Location: /?page=files&domain='.rawurlencode($domain).'&edit='.rawurlencode($path)); exit; } $error=(string)($result['error']??'Gagal menyimpan file.'); }
+  } elseif(isset($_POST['file_create']) && !empty($_SESSION['user']) && empty($user['must_change'])) {
+    $domain=strtolower(trim((string)($_POST['domain']??''))); $path=trim((string)($_POST['path']??'')); $content=(string)($_POST['content']??'');
+    if(!validDomain($domain)) $error='Domain tidak valid.';
+    elseif($path==='') $error='Nama file wajib diisi.';
+    elseif(strlen($content)>FILE_MAX_BYTES) $error='File maksimal 1 MiB.';
+    else { $result=agentRequest('POST','/api/v1/files/create',['domain'=>$domain,'path'=>$path,'content'=>$content]); if(!empty($result['ok'])) { $_SESSION['flash']='File baru berhasil dibuat.'; header('Location: /?page=files&domain='.rawurlencode($domain).'&edit='.rawurlencode($path)); exit; } $error=(string)($result['error']??'Gagal membuat file.'); }
+  } elseif(isset($_POST['folder_create']) && !empty($_SESSION['user']) && empty($user['must_change'])) {
+    $domain=strtolower(trim((string)($_POST['domain']??''))); $path=trim((string)($_POST['path']??''));
+    if(!validDomain($domain)) $error='Domain tidak valid.';
+    elseif($path==='') $error='Nama folder wajib diisi.';
+    else { $result=agentRequest('POST','/api/v1/files/mkdir',['domain'=>$domain,'path'=>$path]); if(!empty($result['ok'])) { $_SESSION['flash']='Folder berhasil dibuat.'; header('Location: /?page=files&domain='.rawurlencode($domain).'&path='.rawurlencode(dirname($path)==='.'?'':dirname($path))); exit; } $error=(string)($result['error']??'Gagal membuat folder.'); }
+  } elseif(isset($_POST['file_delete']) && !empty($_SESSION['user']) && empty($user['must_change'])) {
+    $domain=strtolower(trim((string)($_POST['domain']??''))); $path=(string)($_POST['path']??'');
+    if(!validDomain($domain)) $error='Domain tidak valid.';
+    elseif($path==='') $error='Document root tidak dapat dihapus.';
+    else { $result=agentRequest('POST','/api/v1/files/delete',['domain'=>$domain,'path'=>$path]); if(!empty($result['ok'])) { $_SESSION['flash']='Item berhasil dihapus.'; header('Location: /?page=files&domain='.rawurlencode($domain).'&path='.rawurlencode(dirname($path)==='.'?'':dirname($path))); exit; } $error=(string)($result['error']??'Gagal menghapus item.'); }
   } elseif(isset($_POST['logout'])) { $_SESSION=[]; session_regenerate_id(true); header('Location: /'); exit; }
 }
 $logged=!empty($_SESSION['user']); $user=loadUser(); $page=(string)($_GET['page']??'dashboard');
