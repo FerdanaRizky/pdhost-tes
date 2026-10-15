@@ -12,11 +12,11 @@ if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   log "Memasang dependensi Debian/Ubuntu"
   apt-get update
-  apt-get install -y nginx python3 php-cli php-fpm php-curl php-mbstring php-xml curl ca-certificates tar
+  apt-get install -y nginx python3 php-cli php-fpm php-curl php-mbstring php-xml curl ca-certificates tar certbot
 elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
   if command -v dnf >/dev/null 2>&1; then PM=dnf; else PM=yum; fi
   log "Memasang dependensi RHEL-family"
-  "$PM" install -y nginx python3 php-cli php-fpm php-mbstring php-xml curl ca-certificates tar
+  "$PM" install -y nginx python3 php-cli php-fpm php-mbstring php-xml curl ca-certificates tar certbot
 else
   echo "[ERROR] Package manager tidak didukung otomatis: $PRETTY_NAME" >&2
   echo "Versi berikutnya dapat menambah adapter untuk distribusi lain." >&2
@@ -129,7 +129,7 @@ IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [[ -n "$IP" ]] || IP=IP_SERVER
 cat <<INFO
 
-OpenHost Panel v0.6.0 terpasang.
+OpenHost Panel v0.7.0 terpasang.
 URL: http://$IP:8888
 Username: admin
 Password awal: admin (wajib diganti saat login pertama)
