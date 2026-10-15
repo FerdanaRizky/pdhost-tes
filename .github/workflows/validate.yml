@@ -1,0 +1,28 @@
+name: Validate OpenHost Panel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: none
+      - name: Validate PHP
+        run: php -l public/index.php
+      - name: Validate Python agent
+        run: python3 -c "compile(open('agent/agent.py', encoding='utf-8').read(), 'agent/agent.py', 'exec')"
+      - name: Validate shell scripts
+        run: bash -n install.sh bootstrap.sh
