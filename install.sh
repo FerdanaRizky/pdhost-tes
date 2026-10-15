@@ -48,7 +48,7 @@ compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")
 print("Python agent syntax OK")
 PY
 
-mkdir -p "$BACKUP_DIR" "$APP_DIR" "$CONF_DIR" /var/www/openhost-sites /etc/nginx/conf.d
+mkdir -p "$BACKUP_DIR" "$APP_DIR" "$CONF_DIR" /var/www/openhost-sites /etc/nginx/conf.d /var/log/nginx
 if [[ -d "$APP_DIR" ]]; then cp -a "$APP_DIR" "$BACKUP_DIR/app-before-update" 2>/dev/null || true; fi
 if [[ -f /etc/nginx/conf.d/openhost-panel.conf ]]; then cp -a /etc/nginx/conf.d/openhost-panel.conf "$BACKUP_DIR/"; fi
 
