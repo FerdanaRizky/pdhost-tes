@@ -3,7 +3,7 @@
 import glob, http.server, json, os, platform, re, secrets, shutil, subprocess, tempfile, time
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 TOKEN_FILE = "/etc/openhost-panel/agent.token"
 SITE_ROOT = "/var/www/openhost-sites"
 FILE_MAX_BYTES = 1024 * 1024
