@@ -2,7 +2,7 @@
 
 OpenHost Panel is an independent Linux hosting control panel built with a PHP web interface and a separate allow-listed Python agent. It is not affiliated with aaPanel.
 
-## Current release: v0.7.0
+## Current release: v0.8.0
 
 - Responsive dark dashboard with OS, load average, memory, disk and uptime metrics.
 - Website Manager for validated domains, Nginx virtual hosts and PHP-FPM.
@@ -16,6 +16,7 @@ OpenHost Panel is an independent Linux hosting control panel built with a PHP we
 - Database Manager can create and list OpenHost-managed databases, remove them only after exact-name confirmation, and create compressed SQL backups with root-only file permissions.
 - Backup files are listed in the panel; copy them off-server for disaster recovery.
 - SSL Manager can issue Let's Encrypt certificates using webroot validation and enable HTTPS redirects for OpenHost-managed sites; requires public DNS and inbound ports 80/443.
+- Cron Job Manager supports scheduled PHP files within managed website document roots using validated schedule fields and fixed PHP CLI invocation; arbitrary shell commands are not accepted.
 - Certbot is installed by the supported Debian/Ubuntu and RHEL-family package paths when available.
 - Remote bootstrap and in-place updater command.
 
