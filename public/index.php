@@ -63,7 +63,7 @@ if($_SERVER['REQUEST_METHOD']==='POST') {
     elseif($path==='') $error='Document root tidak dapat dihapus.';
     else { $result=agentRequest('POST','/api/v1/files/delete',['domain'=>$domain,'path'=>$path]); if(!empty($result['ok'])) { $_SESSION['flash']='Item berhasil dihapus.'; header('Location: /?page=files&domain='.rawurlencode($domain).'&path='.rawurlencode(dirname($path)==='.'?'':dirname($path))); exit; } $error=(string)($result['error']??'Gagal menghapus item.'); }
   } elseif(isset($_POST['database_create']) && !empty($_SESSION['user']) && empty($user['must_change'])) {
-    $result=agentRequest('POST','/api/v1/databases/create',[]);
+    $result=agentRequest('POST','/api/v1/databases/create',['confirm'=>true]);
     if(!empty($result['ok'])) {
       $_SESSION['new_db_credentials']=['database'=>(string)$result['database'],'username'=>(string)$result['username'],'password'=>(string)$result['password']];
       $_SESSION['flash']='Database berhasil dibuat. Salin kredensial di bawah sekarang.';
