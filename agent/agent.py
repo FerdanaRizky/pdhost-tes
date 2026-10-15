@@ -3,7 +3,7 @@
 import glob, http.server, json, os, platform, re, secrets, shutil, subprocess, tempfile, time
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 TOKEN_FILE = "/etc/openhost-panel/agent.token"
 SITE_ROOT = "/var/www/openhost-sites"
 FILE_MAX_BYTES = 1024 * 1024
@@ -283,6 +283,29 @@ def delete_site_entry(domain, rel_path):
         raise ValueError("Jenis file tidak didukung.")
     return {"ok": True, "path": relative, "message": "Item berhasil dihapus."}
 
+
+def database_status():
+    binary = shutil.which("mariadb") or shutil.which("mysql")
+    admin = shutil.which("mariadb-admin") or shutil.which("mysqladmin")
+    service_state = "unknown"
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        for service in ("mariadb", "mysql", "mysqld"):
+            result = subprocess.run([systemctl, "is-active", service], stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5, check=False)
+            if result.returncode == 0:
+                service_state = "active"
+                break
+            if result.stdout.strip() == "inactive":
+                service_state = "inactive"
+    ping = False
+    if admin:
+        result = subprocess.run([admin, "--protocol=socket", "ping"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5, check=False)
+        ping = result.returncode == 0
+    return {"ok": True, "installed": bool(binary or admin), "service_state": service_state,
+            "responding": ping, "engine": "MariaDB/MySQL" if binary or admin else None}
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version="OpenHostAgent/"+VERSION
     def log_message(self,*args): pass
@@ -300,6 +323,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         if path=="/api/v1/metrics": self.send_json(200,get_metrics())
         elif path=="/api/v1/sites": self.send_json(200,{"ok":True,"sites":list_sites()})
+        elif path=="/api/v1/databases/status": self.send_json(200,database_status())
         elif path=="/api/v1/files/list":
             q=parse_qs(urlparse(self.path).query)
             try: self.send_json(200,list_site_files(q.get("domain",[""])[0],q.get("path",[""])[0]))
