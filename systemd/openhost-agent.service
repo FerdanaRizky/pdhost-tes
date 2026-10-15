@@ -1,0 +1,27 @@
+[Unit]
+Description=OpenHost Panel privileged allow-listed agent
+After=network.target nginx.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/openhost-panel/agent/agent.py
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadOnlyPaths=/etc/os-release /proc/meminfo /proc/loadavg /proc/uptime
+ReadWritePaths=/etc/nginx/conf.d /var/www/openhost-sites /var/log/nginx
+
+[Install]
+WantedBy=multi-user.target
