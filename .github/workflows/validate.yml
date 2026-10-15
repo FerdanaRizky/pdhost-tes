@@ -26,5 +26,5 @@ jobs:
         run: python3 -c "compile(open('agent/agent.py', encoding='utf-8').read(), 'agent/agent.py', 'exec')"
       - name: Validate shell scripts
         run: bash -n install.sh bootstrap.sh
-      - name: Test File Manager security boundaries
+      - name: Test application security and database manager
         run: python3 -m unittest discover -s tests -v
