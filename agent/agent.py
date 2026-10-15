@@ -356,6 +356,23 @@ def create_database():
             pass
         return {"ok": False, "error": "Gagal membuat database. Pastikan akses socket administratif MariaDB/MySQL tersedia. " + str(exc)[:250]}
 
+def delete_database(database, confirmation):
+    # Only databases created by OpenHost are eligible; exact-name confirmation is mandatory.
+    if not isinstance(database, str) or not re.fullmatch(r"oh_[a-f0-9]{10}", database):
+        return {"ok": False, "error": "Nama database tidak termasuk database yang dikelola OpenHost."}
+    if confirmation != database:
+        return {"ok": False, "error": "Konfirmasi harus sama persis dengan nama database."}
+    suffix = database[3:]
+    username = "ohu_" + suffix
+    sql = (f"DROP DATABASE IF EXISTS `{database}`;\n"
+           f"DROP USER IF EXISTS '{username}'@'localhost';\n"
+           "FLUSH PRIVILEGES;\n")
+    try:
+        mysql_query(sql, timeout=30)
+        return {"ok": True, "database": database, "message": "Database dan akun khususnya berhasil dihapus."}
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": "Gagal menghapus database. " + str(exc)[:250]}
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version="OpenHostAgent/"+VERSION
     def log_message(self,*args): pass
@@ -387,7 +404,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         path=urlparse(self.path).path
-        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create")
+        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create","/api/v1/databases/delete")
         if path not in allowed: self.send_json(404,{"ok":False,"error":"not_found"}); return
         try:
             length=int(self.headers.get("Content-Length","0"))
@@ -396,6 +413,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(data,dict): raise ValueError("Request harus berupa objek.")
             domain=data.get("domain","")
             if path=="/api/v1/databases/create": result=create_database()
+            elif path=="/api/v1/databases/delete": result=delete_database(data.get("database",""),data.get("confirmation",""))
             elif path=="/api/v1/sites/create": result=create_site(domain)
             elif path=="/api/v1/sites/disable": result=disable_site(domain)
             elif path=="/api/v1/files/write": result=write_site_file(domain,data.get("path",""),data.get("content",""))
