@@ -306,6 +306,56 @@ def database_status():
     return {"ok": True, "installed": bool(binary or admin), "service_state": service_state,
             "responding": ping, "engine": "MariaDB/MySQL" if binary or admin else None}
 
+DB_PREFIX = "oh_"
+
+def mysql_query(sql, timeout=20):
+    binary = shutil.which("mariadb") or shutil.which("mysql")
+    if not binary:
+        raise RuntimeError("Klien MariaDB/MySQL belum terpasang.")
+    result = subprocess.run([binary, "--protocol=socket", "--batch", "--skip-column-names"],
+        input=sql, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        timeout=timeout, check=False)
+    if result.returncode:
+        raise RuntimeError((result.stderr or "Operasi database gagal.")[-500:])
+    return result.stdout
+
+def list_databases():
+    if not (shutil.which("mariadb") or shutil.which("mysql")):
+        return {"ok": True, "available": False, "databases": [],
+                "message": "Klien MariaDB/MySQL belum terpasang."}
+    try:
+        output = mysql_query("SHOW DATABASES;")
+        names = sorted({line.strip() for line in output.splitlines()
+                        if re.fullmatch(r"oh_[a-f0-9]{10}", line.strip())})
+        return {"ok": True, "available": True, "databases": [{"name": name} for name in names]}
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "available": True, "databases": [], "error": str(exc)[:400]}
+
+def create_database():
+    if not (shutil.which("mariadb") or shutil.which("mysql")):
+        return {"ok": False, "error": "MariaDB/MySQL belum terpasang. Instal dan aktifkan database server terlebih dahulu."}
+    suffix = secrets.token_hex(5)
+    database = DB_PREFIX + suffix
+    username = "ohu_" + suffix
+    password = secrets.token_urlsafe(24)
+    # Generated identifiers use a strict hex suffix; password is URL-safe and quote-free.
+    sql = (f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n"
+           f"CREATE USER '{username}'@'localhost' IDENTIFIED BY '{password}';\n"
+           f"GRANT ALL PRIVILEGES ON `{database}`.* TO '{username}'@'localhost';\n"
+           "FLUSH PRIVILEGES;\n")
+    try:
+        mysql_query(sql, timeout=30)
+        return {"ok": True, "database": database, "username": username, "password": password,
+                "message": "Database berhasil dibuat. Simpan password sekarang; password tidak akan ditampilkan lagi."}
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        cleanup = (f"DROP USER IF EXISTS '{username}'@'localhost';\n"
+                   f"DROP DATABASE IF EXISTS `{database}`;\nFLUSH PRIVILEGES;\n")
+        try:
+            mysql_query(cleanup, timeout=15)
+        except Exception:
+            pass
+        return {"ok": False, "error": "Gagal membuat database. Pastikan akses socket administratif MariaDB/MySQL tersedia. " + str(exc)[:250]}
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version="OpenHostAgent/"+VERSION
     def log_message(self,*args): pass
@@ -324,6 +374,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path=="/api/v1/metrics": self.send_json(200,get_metrics())
         elif path=="/api/v1/sites": self.send_json(200,{"ok":True,"sites":list_sites()})
         elif path=="/api/v1/databases/status": self.send_json(200,database_status())
+        elif path=="/api/v1/databases": self.send_json(200,list_databases())
         elif path=="/api/v1/files/list":
             q=parse_qs(urlparse(self.path).query)
             try: self.send_json(200,list_site_files(q.get("domain",[""])[0],q.get("path",[""])[0]))
@@ -336,7 +387,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         path=urlparse(self.path).path
-        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete")
+        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create")
         if path not in allowed: self.send_json(404,{"ok":False,"error":"not_found"}); return
         try:
             length=int(self.headers.get("Content-Length","0"))
@@ -344,7 +395,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data=json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(data,dict): raise ValueError("Request harus berupa objek.")
             domain=data.get("domain","")
-            if path=="/api/v1/sites/create": result=create_site(domain)
+            if path=="/api/v1/databases/create": result=create_database()
+            elif path=="/api/v1/sites/create": result=create_site(domain)
             elif path=="/api/v1/sites/disable": result=disable_site(domain)
             elif path=="/api/v1/files/write": result=write_site_file(domain,data.get("path",""),data.get("content",""))
             elif path=="/api/v1/files/create": result=write_site_file(domain,data.get("path",""),data.get("content",""),create_only=True)
