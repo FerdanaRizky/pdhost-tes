@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.0
+- Added Database Manager creation form and managed database listing.
+- Creates a database with a random name and a dedicated local account scoped to that database.
+- Shows generated credentials once after creation; the password is not stored by the panel.
+- Added unit tests for database creation and listing; CI validates the database grant scope.
+
 ## v0.4.0
 - Added Database Manager navigation and status page.
 - Displays MariaDB/MySQL client detection, systemd service status, and local socket response using the authenticated agent.
