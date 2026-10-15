@@ -64,9 +64,27 @@ def list_cron_jobs():
         except (OSError, UnicodeError): continue
     return {"ok": True, "jobs": jobs}
 
+
+def _valid_cron_field(value, low, high):
+    pattern = r"(\*|[0-9]+|\*/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*/[0-9]+|[0-9]+-[0-9]+))*"
+    if not isinstance(value, str) or len(value) >= 64 or not re.fullmatch(pattern, value): return False
+    for part in value.split(","):
+        if part == "*": continue
+        if part.startswith("*/"):
+            n = int(part[2:])
+            if n < 1 or n > high-low+1: return False
+        elif "-" in part:
+            left, right = (int(x) for x in part.split("-", 1))
+            if left < low or right > high or left > right: return False
+        else:
+            n = int(part)
+            if n < low or n > high: return False
+    return True
+
+
 def create_cron_job(data):
     schedule = [data.get(k, "*") for k in ("minute","hour","day","month","weekday")]
-    if not all(isinstance(v,str) and re.fullmatch(r"(\*|[0-9]+|\*/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*/[0-9]+|[0-9]+-[0-9]+))*",v) and len(v)<64 for v in schedule):
+    if not all(_valid_cron_field(v, *bounds) for v, bounds in zip(schedule, CRON_FIELDS)):
         return {"ok":False,"error":"Format jadwal cron tidak valid."}
     domain, script = data.get("domain",""), data.get("script","")
     if not valid_domain(domain) or not isinstance(script,str) or not re.fullmatch(r"[A-Za-z0-9_./-]+\.php",script) or script.startswith("/") or ".." in script.split("/") or "//" in script:
