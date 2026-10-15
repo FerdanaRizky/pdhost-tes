@@ -15,6 +15,10 @@ class CronManagerTests(unittest.TestCase):
         result = agent.create_cron_job({'domain':'example.com','script':'../secret.php'})
         self.assertFalse(result['ok'])
 
+    def test_rejects_out_of_range_cron_values(self):
+        result = agent.create_cron_job({'domain':'example.com','script':'task.php','minute':'99'})
+        self.assertFalse(result['ok'])
+
     def test_rejects_shell_metacharacters_in_schedule(self):
         result = agent.create_cron_job({'domain':'example.com','script':'tasks/job.php','minute':'*;id'})
         self.assertFalse(result['ok'])
