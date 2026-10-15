@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.0
+- Added Cron Job Manager UI and allow-listed agent endpoints for listing, creating and deleting managed PHP cron tasks.
+- Cron tasks are limited to existing PHP files inside an OpenHost website document root and execute as `www-data`.
+- Validates cron field syntax and numeric ranges; deletion requires exact cron filename confirmation.
+- Added automated Cron Manager safety tests.
+
 ## v0.7.0
 - Added SSL Certificates page to request Let's Encrypt certificates for OpenHost-managed websites.
 - Added authenticated agent endpoints for certificate status and issuance.
