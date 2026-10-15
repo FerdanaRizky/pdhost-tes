@@ -36,5 +36,22 @@ class DatabaseManagerTests(unittest.TestCase):
         self.assertEqual([x['name'] for x in result['databases']], ['oh_0123456789'])
 
 
+    @patch.object(agent, 'mysql_query')
+    @patch.object(agent.shutil, 'which')
+    def test_delete_requires_exact_confirmation(self, which, mysql_query):
+        which.return_value = '/usr/bin/mariadb'
+        invalid = agent.delete_database('externaldb', 'externaldb')
+        self.assertFalse(invalid['ok'])
+        mysql_query.assert_not_called()
+        mismatch = agent.delete_database('oh_0123456789', 'wrong')
+        self.assertFalse(mismatch['ok'])
+        mysql_query.assert_not_called()
+
+    @patch.object(agent.shutil, 'which', return_value=None)
+    def test_backup_requires_dump_utility(self, which):
+        result = agent.backup_database('oh_0123456789')
+        self.assertFalse(result['ok'])
+        self.assertIn('belum terpasang', result['error'])
+
 if __name__ == '__main__':
     unittest.main()
