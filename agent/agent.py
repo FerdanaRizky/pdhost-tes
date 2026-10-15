@@ -373,6 +373,55 @@ def delete_database(database, confirmation):
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "error": "Gagal menghapus database. " + str(exc)[:250]}
 
+BACKUP_ROOT = "/opt/openhost-panel/backups/databases"
+
+def list_database_backups():
+    os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
+    items = []
+    for name in sorted(os.listdir(BACKUP_ROOT), reverse=True):
+        if not re.fullmatch(r"oh_[a-f0-9]{10}_[0-9]{8}T[0-9]{6}Z\.sql(\.gz)?", name):
+            continue
+        path = os.path.join(BACKUP_ROOT, name)
+        if os.path.isfile(path) and not os.path.islink(path):
+            stat = os.stat(path, follow_symlinks=False)
+            items.append({"name": name, "size": stat.st_size, "modified": int(stat.st_mtime)})
+    return {"ok": True, "backups": items}
+
+def backup_database(database):
+    if not isinstance(database, str) or not re.fullmatch(r"oh_[a-f0-9]{10}", database):
+        return {"ok": False, "error": "Nama database tidak termasuk database yang dikelola OpenHost."}
+    dump = shutil.which("mariadb-dump") or shutil.which("mysqldump")
+    if not dump:
+        return {"ok": False, "error": "Utilitas mariadb-dump/mysqldump belum terpasang."}
+    os.makedirs(BACKUP_ROOT, mode=0o700, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    name = f"{database}_{stamp}.sql.gz"
+    target = os.path.join(BACKUP_ROOT, name)
+    fd, temp_path = tempfile.mkstemp(prefix=".openhost-backup-", dir=BACKUP_ROOT)
+    os.close(fd)
+    try:
+        with open(temp_path, "wb") as output:
+            dump_result = subprocess.run([dump, "--protocol=socket", "--single-transaction", "--quick", "--routines", "--triggers", database],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300, check=False)
+            if dump_result.returncode:
+                raise RuntimeError((dump_result.stderr.decode("utf-8", "replace") or "Database dump gagal.")[-400:])
+            import gzip
+            with gzip.GzipFile(fileobj=output, mode="wb", mtime=0) as gz:
+                gz.write(dump_result.stdout)
+            output.flush(); os.fsync(output.fileno())
+        if os.path.getsize(temp_path) < 20:
+            raise RuntimeError("Hasil backup kosong atau tidak valid.")
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, target)
+        return {"ok": True, "database": database, "backup": name, "size": os.path.getsize(target),
+                "message": "Backup berhasil dibuat. File disimpan dengan izin hanya untuk root."}
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": "Backup gagal: " + str(exc)[:350]}
+    finally:
+        if os.path.exists(temp_path):
+            try: os.unlink(temp_path)
+            except OSError: pass
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version="OpenHostAgent/"+VERSION
     def log_message(self,*args): pass
@@ -392,6 +441,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path=="/api/v1/sites": self.send_json(200,{"ok":True,"sites":list_sites()})
         elif path=="/api/v1/databases/status": self.send_json(200,database_status())
         elif path=="/api/v1/databases": self.send_json(200,list_databases())
+        elif path=="/api/v1/databases/backups": self.send_json(200,list_database_backups())
         elif path=="/api/v1/files/list":
             q=parse_qs(urlparse(self.path).query)
             try: self.send_json(200,list_site_files(q.get("domain",[""])[0],q.get("path",[""])[0]))
@@ -404,7 +454,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized(): self.send_json(401,{"ok":False,"error":"unauthorized"}); return
         path=urlparse(self.path).path
-        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create","/api/v1/databases/delete")
+        allowed=("/api/v1/sites/create","/api/v1/sites/disable","/api/v1/files/write","/api/v1/files/create","/api/v1/files/mkdir","/api/v1/files/delete","/api/v1/databases/create","/api/v1/databases/delete","/api/v1/databases/backup")
         if path not in allowed: self.send_json(404,{"ok":False,"error":"not_found"}); return
         try:
             length=int(self.headers.get("Content-Length","0"))
@@ -414,6 +464,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             domain=data.get("domain","")
             if path=="/api/v1/databases/create": result=create_database()
             elif path=="/api/v1/databases/delete": result=delete_database(data.get("database",""),data.get("confirmation",""))
+            elif path=="/api/v1/databases/backup": result=backup_database(data.get("database",""))
             elif path=="/api/v1/sites/create": result=create_site(domain)
             elif path=="/api/v1/sites/disable": result=disable_site(domain)
             elif path=="/api/v1/files/write": result=write_site_file(domain,data.get("path",""),data.get("content",""))
